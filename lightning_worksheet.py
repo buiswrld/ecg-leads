@@ -34,7 +34,7 @@ PARAMS = {
     # * Fill in the paths corresponding to where the CSV and data are located for our dataset.
     # Since we are using Colab, make sure to mount your Google Drive at the top and update the paths accordingly.
     "csv_path": data_path + "processed_ptbxl_metadata.csv",
-    "data_root": data_path + "X_numpy_ndarray.npy",
+    "data_root": data_path,
 
     # None means use all 12 ECG leads.
     # Later, we can replace this with a smaller list of selected leads.
