@@ -1,0 +1,78 @@
+import pandas as pd
+import numpy as np
+import wfdb
+import ast
+import gdown
+import zipfile
+import os
+from pathlib import Path
+
+
+# ------------------------------------------------------------
+# Download and Unzip the PTBXL dataset
+# ------------------------------------------------------------
+
+# Configuration
+file_id = "1f4sk1pCJ6SKK8M-TRpEhEiVqvLTHV80p"
+output_zip = "download_file.zip"
+extract_folder = "unzipped_files"
+
+# Download the Google Drive file
+url = f"https://drive.google.com/uc?id={file_id}"
+gdown.download(url, output_zip, quiet = False)
+
+# Unzip the zip file
+os.makedirs(extract_folder, exist_ok=True)
+with zipfile.ZipFile(output_zip, 'r') as zip_ref:
+    zip_ref.extractall(extract_folder)
+
+# Access unzipped datasets
+path = './unzipped_files/ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.1/'
+sampling_rate=100
+
+
+# ------------------------------------------------------------
+# Load and Aggregate Metadata
+# ------------------------------------------------------------
+
+# Functions
+def aggregate_diagnostic(y_dic):
+    tmp = []
+    for key in y_dic.keys():
+        if key in agg_df.index:
+            tmp.append(agg_df.loc[key].diagnostic_class)
+    return list(set(tmp))
+
+# Load and convert annotation data
+Y = pd.read_csv(path+'ptbxl_database.csv', index_col='ecg_id')
+Y.scp_codes = Y.scp_codes.apply(lambda x: ast.literal_eval(x))
+
+# Load scp_statements.csv for diagnostic aggregation
+agg_df = pd.read_csv(path+'scp_statements.csv', index_col=0)
+agg_df = agg_df[agg_df.diagnostic == 1]
+
+# Apply diagnostic superclass
+Y['diagnostic_superclass'] = Y.scp_codes.apply(aggregate_diagnostic)
+
+# Save the processed metadata to a new CSV file
+Y.to_csv("processed_ptbxl_metadata.csv")
+
+
+# ------------------------------------------------------------
+# Load raw ECG data
+# ------------------------------------------------------------
+
+# Functions
+def load_raw_data(df, sampling_rate, path):
+    if sampling_rate == 100:
+        data = [wfdb.rdsamp(path+f) for f in df.filename_lr]
+    else:
+        data = [wfdb.rdsamp(path+f) for f in df.filename_hr]
+    data = np.array([signal for signal, meta in data])
+    return data
+
+# Load raw signal data: sampling_rate=100 or 500
+X = load_raw_data(Y, sampling_rate, path)
+
+# Save X numpy.ndarray object
+np.save("X_numpy_ndarray.npy", X)
