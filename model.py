@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
+from metrics import compute_classification_metrics
 
 # Try to import ResNet1D from your local directory
 try:
@@ -48,6 +49,10 @@ class ECGClassificationTask(pl.LightningModule):
         loss = self.loss_fn(logits, labels)
         
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        metrics = compute_classification_metrics(logits, labels)
+        self.log("val_auroc", metrics["auroc"], on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val_auprc", metrics["auprc"], on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val_f1",    metrics["f1"],    on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -57,6 +62,10 @@ class ECGClassificationTask(pl.LightningModule):
         loss = self.loss_fn(logits, labels)
         
         self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        metrics = compute_classification_metrics(logits, labels)
+        self.log("test_auroc", metrics["auroc"], on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        self.log("test_auprc", metrics["auprc"], on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        self.log("test_f1",    metrics["f1"],    on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def configure_optimizers(self):
