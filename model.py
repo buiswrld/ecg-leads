@@ -42,7 +42,7 @@ class ECGClassificationTask(pl.LightningModule):
         logits = self.forward(ecgs)  
         loss = self.loss_fn(logits, labels)
         
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)   
+        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
