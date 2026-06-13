@@ -78,7 +78,17 @@ def train(
         enable_progress_bar=False, # in Colab the progress bar doesn't display correctly
     )
     trainer.fit(task, train_loader, val_loader)
-    trainer.test(task, test_loader)
+
+    best_path = ckpt_callback.best_model_path
+
+    if not best_path:
+        raise ValueError("No best checkpoint found. Check val_loss logging.")
+    
+    trainer.test(
+        model=task,
+        dataloaders=test_loader,
+        ckpt_path=best_path
+    )
 
 def test(
     exp_name,
