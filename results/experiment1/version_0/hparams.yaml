@@ -1,0 +1,3 @@
+num_leads: 12
+num_classes: 5
+learning_rate: 0.001
