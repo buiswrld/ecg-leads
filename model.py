@@ -30,6 +30,9 @@ class ECGClassificationTask(pl.LightningModule):
 
         self.loss_fn = nn.BCEWithLogitsLoss()
 
+        self.validation_outputs = []
+        self.test_outputs = []
+
     def forward(self, ecg):
         return self.model(ecg)
 
@@ -39,7 +42,7 @@ class ECGClassificationTask(pl.LightningModule):
         logits = self.forward(ecgs)  
         loss = self.loss_fn(logits, labels)
         
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)   
+        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -47,6 +50,7 @@ class ECGClassificationTask(pl.LightningModule):
         labels = batch["label"]
         logits = self.forward(ecgs)
         loss = self.loss_fn(logits, labels)
+        self.validation_outputs.append((logits.detach(), labels.detach()))
         
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         metrics = compute_classification_metrics(logits, labels)
@@ -60,6 +64,7 @@ class ECGClassificationTask(pl.LightningModule):
         labels = batch["label"]
         logits = self.forward(ecgs)
         loss = self.loss_fn(logits, labels)
+        self.test_outputs.append((logits.detach(), labels.detach()))
         
         self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         metrics = compute_classification_metrics(logits, labels)
@@ -67,6 +72,30 @@ class ECGClassificationTask(pl.LightningModule):
         self.log("test_auprc", metrics["auprc"], on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log("test_f1",    metrics["f1"],    on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return loss
+    
+    def on_validation_epoch_end(self):
+        if not self.validation_outputs:
+            return
+
+        logits = torch.cat([item[0] for item in self.validation_outputs], dim=0)
+        labels = torch.cat([item[1] for item in self.validation_outputs], dim=0)
+        metrics = compute_classification_metrics(logits, labels)
+        self.log("val_auroc", metrics["auroc"], prog_bar=True, logger=True)
+        self.log("val_auprc", metrics["auprc"], prog_bar=True, logger=True)
+        self.log("val_f1", metrics["f1"], prog_bar=True, logger=True)
+        self.validation_outputs.clear()
+
+    def on_test_epoch_end(self):
+        if not self.test_outputs:
+            return
+
+        logits = torch.cat([item[0] for item in self.test_outputs], dim=0)
+        labels = torch.cat([item[1] for item in self.test_outputs], dim=0)
+        metrics = compute_classification_metrics(logits, labels)
+        self.log("test_auroc", metrics["auroc"], prog_bar=True, logger=True)
+        self.log("test_auprc", metrics["auprc"], prog_bar=True, logger=True)
+        self.log("test_f1", metrics["f1"], prog_bar=True, logger=True)
+        self.test_outputs.clear()
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.learning_rate)

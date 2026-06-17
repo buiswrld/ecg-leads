@@ -4,6 +4,7 @@ import fire
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
+from pytorch_lightning.loggers import CSVLogger
 from torch.utils.data import DataLoader
 
 # Local Imports
@@ -44,8 +45,14 @@ def train(
         learning_rate=learning_rate,
     )
 
+    # -- Logger -- 
+    logger = CSVLogger(
+        save_dir=save_dir,
+        name=exp_name
+    )
+
     # -- Callbacks --
-    ckpt_dir = os.path.join(save_dir, exp_name, "ckpts")
+    ckpt_dir = os.path.join(logger.log_dir, "ckpts")
     os.makedirs(ckpt_dir, exist_ok=True)
 
     ckpt_callback = ModelCheckpoint(
@@ -67,9 +74,21 @@ def train(
         accelerator=accelerator,
         gradient_clip_val=gradient_clip_val,
         callbacks=[early_stop_callback, ckpt_callback],
+        logger=logger,
+        enable_progress_bar=False, # in Colab the progress bar doesn't display correctly
     )
     trainer.fit(task, train_loader, val_loader)
-    trainer.test(task, test_loader)
+
+    best_path = ckpt_callback.best_model_path
+
+    if not best_path:
+        raise ValueError("No best checkpoint found. Check val_loss logging.")
+    
+    trainer.test(
+        model=task,
+        dataloaders=test_loader,
+        ckpt_path=best_path
+    )
 
 def test(
     exp_name,
