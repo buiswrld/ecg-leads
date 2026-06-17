@@ -8,6 +8,7 @@ from classifier import ECGClassificationTask
 
 def test(
     exp_name,
+    ckpt_exp_name="experiment1",
     save_dir="results",
     csv_path="processed_ptbxl_metadata.csv",
     data_root=".",
@@ -19,7 +20,7 @@ def test(
     corruption_lead_idx=0,
 ):
     """Evaluate a saved checkpoint, optionally with a corruption applied."""
-    ckpt_dir  = os.path.join(save_dir, exp_name, "ckpts")
+    ckpt_dir  = os.path.join(save_dir, ckpt_exp_name, "version_0", "ckpts")
     ckpt_path = glob.glob(os.path.join(ckpt_dir, "*.ckpt"))
 
     if not ckpt_path:
