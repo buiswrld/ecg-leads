@@ -1,0 +1,4 @@
+Subset Size,Selected Leads,Clean F1,Clean AUROC,Instability Penalty,Final Robust Score
+1,['aVR'],0.520126,0.839301,0.129169,0.390958
+3,"['aVR', 'V6', 'V1']",0.575777,0.87298,0.123695,0.452082
+6,"['aVR', 'V6', 'V1', 'III', 'V5', 'V2']",0.623159,0.89053,0.168202,0.454957
