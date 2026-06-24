@@ -15,7 +15,7 @@ def run_greedy_selection(mode="robust", target_sizes=[1, 3, 6]):
     
     print(f"\n=========================================================")
     # Visual anchors for training logs
-    print(f"🧬 RUNNING: {mode.upper()} GREEDY LEAD SELECTION")
+    print(f"RUNNING: {mode.upper()} GREEDY LEAD SELECTION")
     print(f"=========================================================")
 
     for size in range(1, max(target_sizes) + 1):
@@ -49,7 +49,7 @@ def run_greedy_selection(mode="robust", target_sizes=[1, 3, 6]):
                     instability_penalties.append(instability["flip_rate"] + instability["prob_shift"])
                 
                 penalty = np.mean(instability_penalties)
-                score = clean_results["f1"] - penalty  # 🔥 THE NOVEL ROBUST FORMULA!
+                score = clean_results["f1"] - penalty  # 
 
             if score > best_score:
                 best_score = score
@@ -72,7 +72,7 @@ def run_greedy_selection(mode="robust", target_sizes=[1, 3, 6]):
                 "Instability Penalty": best_candidate_metrics["penalty"],
                 "Final Robust Score": best_candidate_metrics["robust_score"]
             })
-            print(f"🏆 Size {size} Locked: {selected_leads} | Score: {best_score:.4f}")
+            print(f"Size {size} Locked: {selected_leads} | Score: {best_score:.4f}")
 
     return pd.DataFrame(summary_history)
 
@@ -83,8 +83,8 @@ if __name__ == "__main__":
     # Run Experiment 4/5 (Robust Selection Criterion)
     robust_df = run_greedy_selection(mode="robust", target_sizes=[1, 3, 6])
     
-    print("\n📊 EXPERIMENT 3 SUMMARY (CLEAN SELECTION):")
+    print("\n EXPERIMENT 3 SUMMARY (CLEAN SELECTION):")
     print(clean_df.to_string(index=False))
     
-    print("\n📊 EXPERIMENT 4/5 SUMMARY (ROBUST SELECTION):")
+    print("\n EXPERIMENT 4/5 SUMMARY (ROBUST SELECTION):")
     print(robust_df.to_string(index=False))
