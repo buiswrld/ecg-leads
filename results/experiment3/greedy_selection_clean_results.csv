@@ -1,4 +1,0 @@
-mode,subset_size,selected_leads,test_f1
-clean,1,['V6'],0.6180850863456726
-clean,3,"['V6', 'III', 'I']",0.6899328231811523
-clean,6,"['V6', 'III', 'I', 'V3', 'V2', 'aVF']",0.7213353514671326

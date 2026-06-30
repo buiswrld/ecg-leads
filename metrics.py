@@ -1,107 +1,73 @@
-from __future__ import annotations
-
-from typing import Dict
-
 import torch
+from torchmetrics.classification import (
+    MultilabelAUROC, MultilabelAveragePrecision, MultilabelF1Score,
+    MultilabelStatScores
+)
 
+class ECGMetrics:
+    def __init__(self, num_classes=5):
+        self.num_classes = num_classes
+        self.auroc_metric = MultilabelAUROC(num_labels=num_classes, average="macro")
+        self.auprc_metric = MultilabelAveragePrecision(num_labels=num_classes, average="macro")
+        self.f1_metric = MultilabelF1Score(num_labels=num_classes, average="macro")
+        # Stat scores give us True Positives, False Positives, True Negatives, False Negatives
+        self.stats_metric = MultilabelStatScores(num_labels=num_classes, average="micro")
 
-def _validate_inputs(logits: torch.Tensor, labels: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    '''Metrics expect one score and one binary target per class.'''
-    if logits.ndim != 2 or labels.ndim != 2:
-        raise ValueError("Expected logits and labels with shape (batch, num_classes).")
-    if logits.shape != labels.shape:
-        raise ValueError(f"Shape mismatch: logits={tuple(logits.shape)}, labels={tuple(labels.shape)}.")
+    def compute_all(self, logits: torch.Tensor, labels: torch.Tensor) -> dict:
+        probs = torch.sigmoid(logits)
+        labels_int = labels.to(torch.long)
+        device = logits.device
 
-    return logits.detach().float(), labels.detach().float()
+        auroc = self.auroc_metric.to(device)(probs, labels_int)
+        auprc = self.auprc_metric.to(device)(probs, labels_int)
+        f1 = self.f1_metric.to(device)(probs, labels_int)
+        
+        # Calculate raw stat counts for clinical ratios
+        tp, fp, tn, fn, _ = self.stats_metric.to(device)(probs, labels_int)
+        
+        # Avoid division by zero bugs
+        sensitivity = tp / (tp + fn + 1e-6)
+        specificity = tn / (tn + fp + 1e-6)
+        fnr = fn / (tp + fn + 1e-6)
 
-
-def _nanmean(values: torch.Tensor) -> torch.Tensor:
-    valid = ~torch.isnan(values)
-    if not valid.any():
-        return values.new_tensor(float("nan"))
-    return values[valid].mean()
-
-
-def _macro_auroc(probabilities: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-    '''Compute each class AUROC by ranking predictions, then average valid classes.'''
-    positives = labels.sum(dim=0)
-    negatives = labels.size(0) - positives
-    valid_classes = (positives > 0) & (negatives > 0)
-    if not valid_classes.any():
-        return probabilities.new_tensor(float("nan"))
-
-    scores = probabilities[:, valid_classes]
-    targets = labels[:, valid_classes]
-    order = torch.argsort(scores, dim=0, descending=True)
-    sorted_targets = torch.gather(targets, dim=0, index=order)
-
-    tp = sorted_targets.cumsum(dim=0)
-    fp = (1.0 - sorted_targets).cumsum(dim=0)
-    pos = targets.sum(dim=0).clamp_min(1.0)
-    neg = (targets.size(0) - targets.sum(dim=0)).clamp_min(1.0)
-
-    tpr = tp / pos
-    fpr = fp / neg
-    zero = torch.zeros((1, tpr.size(1)), dtype=tpr.dtype, device=tpr.device)
-    tpr = torch.cat((zero, tpr), dim=0)
-    fpr = torch.cat((zero, fpr), dim=0)
-
-    return torch.trapz(tpr, fpr, dim=0).mean()
-
-
-def _macro_auprc(probabilities: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-    '''Average precision is computed from precision at each positive-ranked example.'''
-    positives = labels.sum(dim=0)
-    valid_classes = positives > 0
-    if not valid_classes.any():
-        return probabilities.new_tensor(float("nan"))
-
-    scores = probabilities[:, valid_classes]
-    targets = labels[:, valid_classes]
-    order = torch.argsort(scores, dim=0, descending=True)
-    sorted_targets = torch.gather(targets, dim=0, index=order)
-
-    tp = sorted_targets.cumsum(dim=0)
-    ranks = torch.arange(1, targets.size(0) + 1, dtype=targets.dtype, device=targets.device).unsqueeze(1)
-    precision_at_k = tp / ranks
-    average_precision = (precision_at_k * sorted_targets).sum(dim=0) / targets.sum(dim=0).clamp_min(1.0)
-
-    return average_precision.mean()
-
-
-def _macro_f1(probabilities: torch.Tensor, labels: torch.Tensor, threshold: float) -> torch.Tensor:
-    '''Convert probabilities to binary predictions, then compute macro F1.'''
-    predictions = (probabilities >= threshold).to(labels.dtype)
-
-    tp = (predictions * labels).sum(dim=0)
-    fp = (predictions * (1.0 - labels)).sum(dim=0)
-    fn = ((1.0 - predictions) * labels).sum(dim=0)
-
-    denominator = (2.0 * tp) + fp + fn
-    per_class_f1 = torch.where(
-        denominator > 0,
-        (2.0 * tp) / denominator.clamp_min(1.0),
-        torch.full_like(denominator, float("nan")),
-    )
-    return _nanmean(per_class_f1)
-
-
-def compute_classification_metrics(
-    logits: torch.Tensor,
-    labels: torch.Tensor,
-    threshold: float = 0.5,
-) -> Dict[str, torch.Tensor]:
-    """Compute macro AUROC, macro AUPRC, and macro F1 for multi-label logits."""
-    '''Public metric entry point used by validation and test logging.'''
-    logits, labels = _validate_inputs(logits, labels)
-
-    with torch.no_grad():
-        probabilities = torch.sigmoid(logits)
         return {
-            "auroc": _macro_auroc(probabilities, labels),
-            "auprc": _macro_auprc(probabilities, labels),
-            "f1": _macro_f1(probabilities, labels, threshold),
+            "auroc": auroc.item(),
+            "auprc": auprc.item(),
+            "f1": f1.item(),
+            "sensitivity": sensitivity.item(),
+            "specificity": specificity.item(),
+            "fnr": fnr.item(),
+            "raw_probs": probs.detach().cpu(),
+            "raw_preds": (probs > 0.5).to(torch.int).detach().cpu()
         }
 
+    @staticmethod
+    def compute_instability(clean_res: dict, corr_res: dict) -> dict:
+        """
+        Computes the novelty metrics: Diagnosis Flip Rate and Probability Shift
+        by comparing clean predictions against corrupted predictions.
+        """
+        clean_preds = clean_res["raw_preds"]
+        corr_preds = corr_res["raw_preds"]
+        clean_probs = clean_res["raw_probs"]
+        corr_probs = corr_res["raw_probs"]
 
-compute_metrics = compute_classification_metrics
+        # Diagnosis Flip Rate: How often did a 0 become a 1, or a 1 become a 0?
+        flips = (clean_preds != corr_preds).float().mean().item()
+
+        # Probability Shift: Mean absolute difference in output confidence strings
+        prob_shift = torch.abs(clean_probs - corr_probs).mean().item()
+
+        # False Negative Amplification (Clean was 1, Corrupted became 0)
+        fn_amp = ((clean_preds == 1) & (corr_preds == 0)).float().mean().item()
+
+        # False Positive Amplification (Clean was 0, Corrupted became 1)
+        fp_amp = ((clean_preds == 0) & (corr_preds == 1)).float().mean().item()
+
+        return {
+            "flip_rate": flips,
+            "prob_shift": prob_shift,
+            "fn_amp": fn_amp,
+            "fp_amp": fp_amp,
+            "perf_drop_auroc": max(0.0, clean_res["auroc"] - corr_res["auroc"])
+        }

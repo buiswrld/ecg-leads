@@ -1,96 +1,105 @@
 import torch
 
-# ── Lead index constants ──────────────────────────────────────────────────────
-_I   = 0
-_II  = 1
-_III = 2
-_AVR = 3
-_AVL = 4
-_AVF = 5
-_V1  = 6
-_V2  = 7
-_V3  = 8
-_V4  = 9
-_V5  = 10
-_V6  = 11
-
-
 class ECGCorruptions:
-    """One class, six static corruption methods. 
-    
-    Compatible with 2D tensors, 3D batches, and 4D channel-packed tensors.
     """
+    Dynamically maps physical ECG corruption swaps based on the active lead subset.
+    """
+    LEAD_MAP = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
 
-    # ── 1. RA / LA swap ──────────────────────────────────────────────────────
-    @staticmethod
-    def ra_la_swap(ecg: torch.Tensor) -> torch.Tensor:
-        """RA ↔ LA electrode reversal."""
-        out = ecg.clone()
-        out[..., _I, :]   = -ecg[..., _I, :]
-        out[..., _II, :]  =  ecg[..., _III, :]
-        out[..., _III, :] =  ecg[..., _II, :]
-        out[..., _AVR, :] = -ecg[..., _AVL, :]
-        out[..., _AVL, :] = -ecg[..., _AVR, :]
-        out[..., _AVF, :] =  ecg[..., _AVF, :]   # unchanged
-        return out
+    @classmethod
+    def _get_indices(cls, leads_in_tensor, lead_a, lead_b):
+        """Helper to find local positions of leads in the current tensor slice."""
+        try:
+            idx_a = leads_in_tensor.index(lead_a)
+            idx_b = leads_in_tensor.index(lead_b)
+            return idx_a, idx_b
+        except ValueError:
+            return None, None
 
-    # ── 2. RA / LL swap ──────────────────────────────────────────────────────
-    @staticmethod
-    def ra_ll_swap(ecg: torch.Tensor) -> torch.Tensor:
-        """RA ↔ LL electrode reversal."""
-        out = ecg.clone()
-        out[..., _I, :]   = -ecg[..., _III, :]
-        out[..., _II, :]  = -ecg[..., _II, :]
-        out[..., _III, :] = -ecg[..., _I, :]
-        out[..., _AVR, :] =  ecg[..., _AVF, :]
-        out[..., _AVL, :] =  ecg[..., _AVL, :]   # unchanged
-        out[..., _AVF, :] =  ecg[..., _AVR, :]
-        return out
+    @classmethod
+    def ra_la_reversal(cls, ecg: torch.Tensor, leads: list = None) -> torch.Tensor:
+        """Swaps RA and LA electrodes safely."""
+        current_leads = leads if leads is not None else cls.LEAD_MAP
+        corrupted = ecg.clone()
+        
+        # Lead I inversion
+        idx_1, _ = cls._get_indices(current_leads, "I", "I")
+        if idx_1 is not None and idx_1 < corrupted.shape[0]: 
+            corrupted[idx_1] = -ecg[idx_1]
+        
+        # Lead II and III swap
+        idx_2, idx_3 = cls._get_indices(current_leads, "II", "III")
+        if idx_2 is not None and idx_3 is not None and idx_2 < corrupted.shape[0] and idx_3 < corrupted.shape[0]:
+            corrupted[idx_2], corrupted[idx_3] = ecg[idx_3], ecg[idx_2]
+            
+        # aVR and aVL swap
+        idx_avr, idx_avl = cls._get_indices(current_leads, "aVR", "aVL")
+        if idx_avr is not None and idx_avl is not None and idx_avr < corrupted.shape[0] and idx_avl < corrupted.shape[0]:
+            corrupted[idx_avr], corrupted[idx_avl] = ecg[idx_avl], ecg[idx_avr]
+        return corrupted
 
-    # ── 3. LA / LL swap ──────────────────────────────────────────────────────
-    @staticmethod
-    def la_ll_swap(ecg: torch.Tensor) -> torch.Tensor:
-        """LA ↔ LL electrode reversal."""
-        out = ecg.clone()
-        out[..., _I, :]   =  ecg[..., _II, :]
-        out[..., _II, :]  =  ecg[..., _I, :]
-        out[..., _III, :] = -ecg[..., _III, :]
-        out[..., _AVR, :] =  ecg[..., _AVR, :]   # unchanged
-        out[..., _AVL, :] =  ecg[..., _AVF, :]
-        out[..., _AVF, :] =  ecg[..., _AVL, :]
-        return out
+    @classmethod
+    def ra_ll_reversal(cls, ecg: torch.Tensor, leads: list = None) -> torch.Tensor:
+        """Swaps RA and LL electrodes safely."""
+        current_leads = leads if leads is not None else cls.LEAD_MAP
+        corrupted = ecg.clone()
+        
+        idx_2, _ = cls._get_indices(current_leads, "II", "II")
+        if idx_2 is not None and idx_2 < corrupted.shape[0]: 
+            corrupted[idx_2] = -ecg[idx_2]
+        
+        idx_1, idx_3 = cls._get_indices(current_leads, "I", "III")
+        if idx_1 is not None and idx_3 is not None and idx_1 < corrupted.shape[0] and idx_3 < corrupted.shape[0]:
+            corrupted[idx_1], corrupted[idx_3] = -ecg[idx_3], -ecg[idx_1]
+            
+        idx_avr, idx_avf = cls._get_indices(current_leads, "aVR", "aVF")
+        if idx_avr is not None and idx_avf is not None and idx_avr < corrupted.shape[0] and idx_avf < corrupted.shape[0]:
+            corrupted[idx_avr], corrupted[idx_avf] = ecg[idx_avf], ecg[idx_avr]
+        return corrupted
 
-    # ── 4. V1 / V2 swap ──────────────────────────────────────────────────────
-    @staticmethod
-    def v1_v2_swap(ecg: torch.Tensor) -> torch.Tensor:
-        """V1 ↔ V2 chest lead swap."""
-        out = ecg.clone()
-        out[..., _V1, :] = ecg[..., _V2, :]
-        out[..., _V2, :] = ecg[..., _V1, :]
-        return out
+    @classmethod
+    def la_ll_reversal(cls, ecg: torch.Tensor, leads: list = None) -> torch.Tensor:
+        """Swaps LA and LL electrodes safely."""
+        current_leads = leads if leads is not None else cls.LEAD_MAP
+        corrupted = ecg.clone()
+        
+        idx_3, _ = cls._get_indices(current_leads, "III", "III")
+        if idx_3 is not None and idx_3 < corrupted.shape[0]: 
+            corrupted[idx_3] = -ecg[idx_3]
+        
+        idx_1, idx_2 = cls._get_indices(current_leads, "I", "II")
+        if idx_1 is not None and idx_2 is not None and idx_1 < corrupted.shape[0] and idx_2 < corrupted.shape[0]:
+            corrupted[idx_1], corrupted[idx_2] = ecg[idx_2], ecg[idx_1]
+            
+        idx_avl, idx_avf = cls._get_indices(current_leads, "aVL", "aVF")
+        if idx_avl is not None and idx_avf is not None and idx_avl < corrupted.shape[0] and idx_avf < corrupted.shape[0]:
+            corrupted[idx_avl], corrupted[idx_avf] = ecg[idx_avf], ecg[idx_avl]
+        return corrupted
 
-    # ── 5. V2 / V3 swap ──────────────────────────────────────────────────────
-    @staticmethod
-    def v2_v3_swap(ecg: torch.Tensor) -> torch.Tensor:
-        """V2 ↔ V3 chest lead swap."""
-        out = ecg.clone()
-        out[..., _V2, :] = ecg[..., _V3, :]
-        out[..., _V3, :] = ecg[..., _V2, :]
-        return out
+    @classmethod
+    def v1_v2_swap(cls, ecg: torch.Tensor, leads: list = None) -> torch.Tensor:
+        """Swaps V1 and V2 safely."""
+        current_leads = leads if leads is not None else cls.LEAD_MAP
+        corrupted = ecg.clone()
+        idx_v1, idx_v2 = cls._get_indices(current_leads, "V1", "V2")
+        if idx_v1 is not None and idx_v2 is not None and idx_v1 < corrupted.shape[0] and idx_v2 < corrupted.shape[0]:
+            corrupted[idx_v1], corrupted[idx_v2] = ecg[idx_v2], ecg[idx_v1]
+        return corrupted
 
-    # ── 6. Single-lead polarity inversion ────────────────────────────────────
-    @staticmethod
-    def single_lead_polarity_inversion(
-        ecg: torch.Tensor,
-        lead_idx: int = 0,
-    ) -> torch.Tensor:
-        """Multiply one lead by -1 across all dimensions."""
-        # Check against the second-to-last dimension (the leads axis)
-        if lead_idx < 0 or lead_idx >= ecg.shape[-2]:
-            raise IndexError(
-                f"lead_idx {lead_idx} out of range for ECG with "
-                f"{ecg.shape[-2]} leads (valid: 0-{ecg.shape[-2]-1})."
-            )
-        out = ecg.clone()
-        out[..., lead_idx, :] = -ecg[..., lead_idx, :]
-        return out
+    @classmethod
+    def v2_v3_swap(cls, ecg: torch.Tensor, leads: list = None) -> torch.Tensor:
+        """Swaps V2 and V3 safely."""
+        current_leads = leads if leads is not None else cls.LEAD_MAP
+        corrupted = ecg.clone()
+        idx_v2, idx_v3 = cls._get_indices(current_leads, "V2", "V3")
+        if idx_v2 is not None and idx_v3 is not None and idx_v2 < corrupted.shape[0] and idx_v3 < corrupted.shape[0]:
+            corrupted[idx_v2], corrupted[idx_v3] = ecg[idx_v3], ecg[idx_v2]
+        return corrupted
+
+    @classmethod
+    def single_lead_polarity_inversion(cls, ecg: torch.Tensor, lead_idx: int = 0, leads: list = None) -> torch.Tensor:
+        """Inverts the polarity of a single specified lead safely."""
+        corrupted = ecg.clone()
+        if lead_idx < corrupted.shape[0]:
+            corrupted[lead_idx] = -ecg[lead_idx]
+        return corrupted
