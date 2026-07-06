@@ -1,18 +1,36 @@
 import numpy as np
 import pandas as pd
 import os
+import random
+import torch
 import main
 from metrics import ECGMetrics
+
+def seed_everything(seed=137):
+    random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    np.random.seed(seed)
+
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+seed_everything(137)
 
 ALL_LEADS = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
 CORRUPTIONS = ["ra_la_reversal", "ra_ll_reversal", "la_ll_reversal", "v1_v2_swap", "v2_v3_swap", "single_lead_polarity_inversion"]
 
-def run_greedy_selection(mode="robust", target_sizes=[1, 3, 6]):
+def run_greedy_selection(mode="robust", target_sizes=[1, 3, 6], results_dir="results"):
     """
     mode: "clean" (Experiment 3) or "robust" (Experiment 4)
     """
     selected_leads = []
     summary_history = []
+
+    os.makedirs(results_dir, exist_ok=True)
     
     print(f"\n=========================================================")
     # Visual anchors for training logs
@@ -23,6 +41,7 @@ def run_greedy_selection(mode="robust", target_sizes=[1, 3, 6]):
         best_score = -1.0
         best_candidate = None
         best_candidate_metrics = {}
+        all_candidates = []
 
         remaining_candidates = [l for l in ALL_LEADS if l not in selected_leads]
         
@@ -51,6 +70,16 @@ def run_greedy_selection(mode="robust", target_sizes=[1, 3, 6]):
                 
                 penalty = np.mean(instability_penalties)
                 score = clean_results["f1"] - penalty  # 
+            
+            all_candidates.append({
+                "Candidate": candidate,
+                "Trial Leads": ",".join(trial_leads),
+                "Clean F1": clean_results["f1"],
+                "Clean AUROC": clean_results["auroc"],
+                "Clean AUPRC": clean_results["auprc"],
+                "Instability Penalty": penalty,
+                "Final Robust Score": score
+            })
 
             if score > best_score:
                 best_score = score
@@ -62,6 +91,11 @@ def run_greedy_selection(mode="robust", target_sizes=[1, 3, 6]):
                     "penalty": penalty,
                     "robust_score": score
                 }
+
+        pd.DataFrame(all_candidates).to_csv(
+            os.path.join(results_dir, f"subset_size_{size}.csv"),
+            index=False
+        )
 
         # Lock in the winner of this greedy tier step
         selected_leads.append(best_candidate)
@@ -81,7 +115,8 @@ def run_greedy_selection(mode="robust", target_sizes=[1, 3, 6]):
 
 if __name__ == "__main__":
     # Run Experiment 3 (Clean Selection Criterion)
-    clean_df = run_greedy_selection(mode="clean", target_sizes=[1, 3, 6])
+    experiment_3 = "results/experiment3"
+    clean_df = run_greedy_selection(mode="clean", target_sizes=[1, 3, 6], results_dir=experiment_3)
     
     # Run Experiment 4 (Robust Selection Criterion)
     # robust_df = run_greedy_selection(mode="robust", target_sizes=[1, 3, 6])
@@ -90,10 +125,9 @@ if __name__ == "__main__":
     print(clean_df.to_string(index=False))
 
     # Save summary to csv file
-    experiment_dir = "results/experiment3"
-    os.makedirs(experiment_dir, exist_ok=True)
+    os.makedirs(experiment_3, exist_ok=True)
     clean_df.to_csv(
-        os.path.join(experiment_dir, "clean_greedy_selection.csv"),
+        os.path.join(experiment_3, "clean_greedy_selection.csv"),
         index=False
     )
     
