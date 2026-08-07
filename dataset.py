@@ -14,7 +14,8 @@ class PTBXLDataset(Dataset):
         self.corruption_lead_idx = corruption_lead_idx
         self.leads = leads if leads is not None else ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
         df = pd.read_csv(csv_path, index_col='ecg_id')
-        df['diagnostic_superclass'] = df['diagnostic_superclass'].apply(lambda x: ast.literal_eval(x))
+        #df['diagnostic_superclass'] = df['diagnostic_superclass'].apply(lambda x: ast.literal_eval(x))
+        df['diagnostic_superclass'] = df['diagnostic_superclass'].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
 
         if split == "train":
             mask = (df.strat_fold <= 8).values

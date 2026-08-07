@@ -9,7 +9,7 @@ class PTBXLDataModule(pl.LightningDataModule):
         data_root=".", 
         batch_size=32, 
         leads=None,                  # Added so it's accessible by the dataset
-        num_workers=4,               # Added for DataLoader optimization
+        num_workers=2, #4               # Added for DataLoader optimization
         corruption=None,             # The "turning on" switch string
         corruption_lead_idx=0        # Target index for single-lead inversions
     ):

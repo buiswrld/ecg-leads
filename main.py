@@ -1,6 +1,7 @@
 import os
 import glob
 import fire
+import pandas as pd
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
@@ -16,15 +17,15 @@ def train(
     csv_path="processed_ptbxl_metadata.csv",
     data_root=".",
     batch_size=32,
-    num_workers=0,
+    num_workers=2, #0
     learning_rate=1e-3,
     max_epochs=10,
     num_classes=5, # NORM, MI, STTC, CD, HYP
     patience=5,
     gradient_clip_val=0.5,
     accelerator="auto",
-    corruption=None,             # NEW: Terminal switch option for corruptions
-    corruption_lead_idx=0        # NEW: Terminal option for targeted lead inversion
+    corruption=None,             # Terminal switch option for corruptions
+    corruption_lead_idx=0        # Terminal option for targeted lead inversion
 ):
     """Run the pipeline end-to-end: Initialize DataModule, train and evaluate."""
     
@@ -48,7 +49,7 @@ def train(
         learning_rate=learning_rate,
         max_epochs=max_epochs,       # Pass max_epochs here
         warmup_epochs=1,
-        corruption=corruption,               # Added here!
+        corruption=corruption,
         corruption_lead_idx=corruption_lead_idx
     )
 
@@ -74,8 +75,10 @@ def train(
     trainer = Trainer(
         max_epochs=max_epochs,
         accelerator=accelerator,
+        precision="16-mixed",
         gradient_clip_val=gradient_clip_val,
         callbacks=[early_stop_callback, ckpt_callback],
+        enable_progress_bar=False, # in Colab the progress bar doesn't display correctly
         logger=False
     )
     
@@ -88,17 +91,22 @@ def train(
 def test(
     exp_name,
     save_dir="results",
+    save_results=False,
+    results_file="results.csv",
+    ckpt_exp=None,  # if you want a checkpoint from a different experiment
     csv_path="processed_ptbxl_metadata.csv",
     data_root=".",
     leads=None,
     batch_size=32,
-    num_workers=0,
+    num_workers=2, #0
     accelerator="auto",
-    corruption=None,             # NEW: Terminal switch option for testing checks
-    corruption_lead_idx=0        # NEW: Terminal option for testing checks
+    corruption=None,             # Terminal switch option for testing checks
+    corruption_lead_idx=0        # Terminal option for testing checks
 ):
     """Run an isolated evaluation loop using an established checkpoint folder and a custom corruption."""
-    ckpt_dir = os.path.join(save_dir, exp_name, "ckpts")
+    if ckpt_exp is None:
+        ckpt_exp = exp_name
+    ckpt_dir = os.path.join(save_dir, ckpt_exp, "ckpts")
     ckpt_path = glob.glob(os.path.join(ckpt_dir, "*.ckpt"))
     if not ckpt_path:
         raise ValueError(f"No checkpoint found in {ckpt_dir}")
@@ -123,8 +131,33 @@ def test(
         #corruption_lead_idx=task.hparams.corruption_lead_idx
     )
     
-    trainer = Trainer(accelerator=accelerator, logger=False)
-    trainer.test(task, datamodule=data_module)
+    trainer = Trainer(accelerator=accelerator, precision="16-mixed", logger=False)
+    results = trainer.test(task, datamodule=data_module)
+    if save_results:
+        metrics = results[0]
+
+        row = {
+            "mode": "clean" if corruption is None else "corrupted",
+            "corruption": corruption,
+            "corruption_lead_idx": (
+                corruption_lead_idx
+                if corruption == "single_lead_polarity_inversion"
+                else None
+            ),
+            "subset_size": 12 if leads is None else len(leads),
+            "selected_leads": str(leads) if leads is not None else "all",
+            **metrics,
+        }
+
+        summary_path = os.path.join(save_dir, exp_name, results_file)
+        os.makedirs(os.path.dirname(summary_path), exist_ok=True)
+
+        pd.DataFrame([row]).to_csv(
+            summary_path,
+            mode="a", # append
+            header=not os.path.exists(summary_path), # write header only first time
+            index=False
+        )
 
     return task.test_epoch_results
 

@@ -33,6 +33,9 @@ class ECGClassificationTask(pl.LightningModule):
         self.val_metrics = ECGMetrics(num_classes=num_classes)
         self.test_metrics = ECGMetrics(num_classes=num_classes)
 
+        self.val_outputs = []
+        self.test_outputs = []
+
     def forward(self, ecg):
         return self.model(ecg)
 
@@ -51,12 +54,12 @@ class ECGClassificationTask(pl.LightningModule):
         logits = self.forward(ecgs)
         loss = self.loss_fn(logits, labels)
         
-        scores = self.val_metrics.compute_all(logits, labels)
+        self.val_outputs.append({
+            "logits": logits.detach().cpu(),
+            "labels": labels.detach().cpu()
+        })
         
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_auroc", scores["auroc"], on_step=False, on_epoch=True, prog_bar=False, logger=True)
-        self.log("val_auprc", scores["auprc"], on_step=False, on_epoch=True, prog_bar=False, logger=True)
-        self.log("val_f1", scores["f1"], on_step=False, on_epoch=True, prog_bar=False, logger=True)
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -64,38 +67,45 @@ class ECGClassificationTask(pl.LightningModule):
         labels = batch["label"]
         logits = self.forward(ecgs)
         loss = self.loss_fn(logits, labels)
-        
-        scores = self.test_metrics.compute_all(logits, labels)
-        
-        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        if not hasattr(self, "test_step_outputs"):
-            self.test_step_outputs = []
-        self.test_step_outputs.append(scores)
-        #self.log("test_auroc", scores["auroc"], on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        #self.log("test_auprc", scores["auprc"], on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        #self.log("test_f1", scores["f1"], on_step=False, on_epoch=True, prog_bar=True, logger=True)
+
+        self.test_outputs.append({
+            "logits": logits.detach().cpu(),
+            "labels": labels.detach().cpu()
+        })
+
+        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True
+        )
+
         return loss
     
-    def on_test_epoch_end(self):
-        # Aggregate across batches
-        outputs = self.test_step_outputs
-        avg_auroc = np.mean([x["auroc"] for x in outputs])
-        avg_auprc = np.mean([x["auprc"] for x in outputs])
-        avg_f1 = np.mean([x["f1"] for x in outputs])
-        avg_sens = np.mean([x["sensitivity"] for x in outputs])
-        avg_spec = np.mean([x["specificity"] for x in outputs])
-        avg_fnr = np.mean([x["fnr"] for x in outputs])
-        
-        # Combine raw tensors for instability calculations
-        all_probs = torch.cat([x["raw_probs"] for x in outputs], dim=0)
-        all_preds = torch.cat([x["raw_preds"] for x in outputs], dim=0)
+    def on_validation_epoch_end(self):
+        all_logits = torch.cat([x["logits"] for x in self.val_outputs], dim=0)
 
-        self.test_epoch_results = {
-            "auroc": avg_auroc, "auprc": avg_auprc, "f1": avg_f1,
-            "sensitivity": avg_sens, "specificity": avg_spec, "fnr": avg_fnr,
-            "raw_probs": all_probs, "raw_preds": all_preds
-        }
-        self.test_step_outputs.clear() # Clear memory safely
+        all_labels = torch.cat([x["labels"] for x in self.val_outputs], dim=0)
+
+        scores = self.val_metrics.compute_all(all_logits, all_labels)
+
+        self.log("val_auroc", scores["auroc"], prog_bar=False)
+        self.log("val_auprc", scores["auprc"], prog_bar=False)
+        self.log("val_f1", scores["f1"], prog_bar=False)
+
+        self.val_outputs.clear()
+    
+    def on_test_epoch_end(self):
+        all_logits = torch.cat([x["logits"] for x in self.test_outputs], dim=0)
+
+        all_labels = torch.cat([x["labels"] for x in self.test_outputs], dim=0)
+
+        # Calculate metrics over entire test set
+        scores = self.test_metrics.compute_all(all_logits, all_labels)
+
+        self.log("test_auroc", scores["auroc"], prog_bar=True, logger=True)
+        self.log("test_auprc", scores["auprc"], prog_bar=True, logger=True)
+        self.log("test_f1", scores["f1"], prog_bar=True, logger=True)
+
+        self.test_epoch_results = scores
+
+        self.test_outputs.clear()
 
     def configure_optimizers(self):
         # Using AdamW optimizer which applies weight decay regularization correctly
