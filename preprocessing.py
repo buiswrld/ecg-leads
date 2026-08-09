@@ -12,7 +12,8 @@ from pathlib import Path
 # Download and Unzip the PTBXL dataset
 # ------------------------------------------------------------
 
-file_id = "1f4sk1pCJ6SKK8M-TRpEhEiVqvLTHV80p"
+# v1.0.1: file_id = "1f4sk1pCJ6SKK8M-TRpEhEiVqvLTHV80p"
+file_id = "1FkVFaW4Z7ub7TQyUDQxuCe_5RCcbANo3"   # v1.0.3
 output_zip = "download_file.zip"
 extract_folder = "unzipped_files"
 url = f"https://drive.google.com/uc?id={file_id}"
@@ -23,9 +24,9 @@ os.makedirs(extract_folder, exist_ok=True)
 with zipfile.ZipFile(output_zip, 'r') as zip_ref:
     zip_ref.extractall(extract_folder)
 
-path = './unzipped_files/ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.1/'
+# v1.0.1: path = './unzipped_files/ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.1/'
+path = './unzipped_files/ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3/'  # v1.0.3
 sampling_rate=100
-
 
 # ------------------------------------------------------------
 # Load and Aggregate Metadata
