@@ -24,8 +24,10 @@ class PTBXLDataset(Dataset):
             mask = (df.strat_fold == 10).values
         else:
             raise ValueError("Split must be 'train', 'val', or 'test'")
-            
+        
+        # self.sample_ids = df[mask].index.to_numpy()
         self.df = df[mask].reset_index(drop=True)
+        self.sample_ids = np.arange(len(self.df))
         full_X = np.load(os.path.join(data_root, "X_numpy_ndarray.npy"))
         self.X = full_X[mask]
         self.lead_map = ["I", "II", "III", "aVR", "aVL", "aVF", "V1", "V2", "V3", "V4", "V5", "V6"]
@@ -43,9 +45,8 @@ class PTBXLDataset(Dataset):
 
     def __getitem__(self, index):
         ecg_signal = self.X[index]
-        if self.lead_indices is not None:
-            ecg_signal = ecg_signal[:, self.lead_indices]
-            
+
+        # Changed: Apply corruption on the full 12 leads before selecting leads
         ecg = torch.tensor(ecg_signal, dtype=torch.float32).transpose(0, 1)
         if self.corruption is not None:
             corruption_fn = getattr(ECGCorruptions, self.corruption, None)
@@ -54,9 +55,13 @@ class PTBXLDataset(Dataset):
                     ecg = corruption_fn(ecg, lead_idx=self.corruption_lead_idx)
                 else:
                     #ecg = corruption_fn(ecg)
-                    ecg = corruption_fn(ecg, leads=self.leads)
+                    ecg = corruption_fn(ecg, leads=self.lead_map)
             else:
                 raise ValueError(f"Corruption '{self.corruption}' not found in ECGCorruptions class.")
+
+        if self.lead_indices is not None:
+            ecg = ecg[self.lead_indices]
+
         label = torch.tensor(self.encoded_labels[index], dtype=torch.float32)
 
-        return {"ecg": ecg, "label": label}
+        return {"ecg": ecg, "label": label, "sample_id": self.sample_ids[index]}

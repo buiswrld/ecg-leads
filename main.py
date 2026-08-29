@@ -83,15 +83,16 @@ def train(
     
     # Run clean training and baseline validations
     trainer.fit(task, datamodule=data_module)
-    
-    # Evaluate model performance (applies corruption here if specified)
-    trainer.test(task, datamodule=data_module)
+
+    # Keep and return the best validation F1 score
+    with open(os.path.join(ckpt_dir, "best_val_f1.txt"), "w") as f:
+        f.write(str(task.best_val_f1))
+
+    return task.best_val_f1
 
 def test(
     exp_name,
     save_dir="results",
-    save_results=False,
-    results_file="results.csv",
     ckpt_exp=None,  # if you want a checkpoint from a different experiment
     csv_path="processed_ptbxl_metadata.csv",
     data_root=".",
@@ -131,34 +132,12 @@ def test(
     )
     
     trainer = Trainer(accelerator=accelerator, logger=False)
-    results = trainer.test(task, datamodule=data_module)
-    if save_results:
-        metrics = results[0]
+    trainer.test(task, datamodule=data_module)
 
-        row = {
-            "mode": "clean" if corruption is None else "corrupted",
-            "corruption": corruption,
-            "corruption_lead_idx": (
-                corruption_lead_idx
-                if corruption == "single_lead_polarity_inversion"
-                else None
-            ),
-            "subset_size": 12 if leads is None else len(leads),
-            "selected_leads": str(leads) if leads is not None else "all",
-            **metrics,
-        }
-
-        summary_path = os.path.join(save_dir, exp_name, results_file)
-        os.makedirs(os.path.dirname(summary_path), exist_ok=True)
-
-        pd.DataFrame([row]).to_csv(
-            summary_path,
-            mode="a", # append
-            header=not os.path.exists(summary_path), # write header only first time
-            index=False
-        )
-
-    return task.test_epoch_results
+    return {
+        "scores": task.test_epoch_results,
+        "outputs": task.test_epoch_outputs,
+    }
 
 if __name__ == "__main__":
     # Expose both train and test routines to Fire CLI

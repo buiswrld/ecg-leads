@@ -36,6 +36,8 @@ class ECGClassificationTask(pl.LightningModule):
         self.val_outputs = []
         self.test_outputs = []
 
+        self.best_val_f1 = 0.0
+
     def forward(self, ecg):
         return self.model(ecg)
 
@@ -68,13 +70,17 @@ class ECGClassificationTask(pl.LightningModule):
         logits = self.forward(ecgs)
         loss = self.loss_fn(logits, labels)
 
+        probs = torch.sigmoid(logits)
+
         self.test_outputs.append({
+            "sample_id": batch["sample_id"].cpu().tolist(),
             "logits": logits.detach().cpu(),
-            "labels": labels.detach().cpu()
+            "labels": labels.detach().cpu(),
+            "probs": probs.detach().cpu(),
+            "preds": (probs > 0.5).int().detach().cpu()
         })
 
-        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True
-        )
+        self.log("test_loss", loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
 
         return loss
     
@@ -89,6 +95,9 @@ class ECGClassificationTask(pl.LightningModule):
         self.log("val_auprc", scores["auprc"], prog_bar=False)
         self.log("val_f1", scores["f1"], prog_bar=False)
 
+        # Keep the highest validation F1 seen across all epochs
+        self.best_val_f1 = max(self.best_val_f1, scores["f1"])
+
         self.val_outputs.clear()
     
     def on_test_epoch_end(self):
@@ -99,11 +108,26 @@ class ECGClassificationTask(pl.LightningModule):
         # Calculate metrics over entire test set
         scores = self.test_metrics.compute_all(all_logits, all_labels)
 
-        self.log("test_auroc", scores["auroc"], prog_bar=True, logger=True)
-        self.log("test_auprc", scores["auprc"], prog_bar=True, logger=True)
-        self.log("test_f1", scores["f1"], prog_bar=True, logger=True)
+        # Per-class metrics
+        class_names = ["CD", "HYP", "MI", "NORM", "STTC"]
 
-        self.test_epoch_results = scores
+        per_class_scores = self.test_metrics.compute_per_class(
+            all_logits,
+            all_labels,
+            class_names
+        )
+
+        # self.log("test_auroc", scores["auroc"], prog_bar=True, logger=True)
+        # self.log("test_auprc", scores["auprc"], prog_bar=True, logger=True)
+        # self.log("test_f1", scores["f1"], prog_bar=True, logger=True)
+
+        self.test_epoch_results = {
+            "overall": scores,
+            "per_class": per_class_scores,
+        }
+
+        # Keep predictions for report generation
+        self.test_epoch_outputs = self.test_outputs.copy()
 
         self.test_outputs.clear()
 
