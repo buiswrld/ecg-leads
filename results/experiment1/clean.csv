@@ -1,2 +1,0 @@
-mode,corruption,corruption_lead_idx,subset_size,selected_leads,test_loss,test_auroc,test_auprc,test_f1
-clean,,,12,all,0.2843107283115387,0.9215493202209473,0.8115274310112,0.7283816337585449

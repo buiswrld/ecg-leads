@@ -1,76 +1,44 @@
+import numpy as np
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
+
 from dataset import PTBXLDataset
 
+
 class PTBXLDataModule(pl.LightningDataModule):
-    def __init__(
-        self, 
-        csv_path="processed_ptbxl_metadata.csv", 
-        data_root=".", 
-        batch_size=32, 
-        leads=None,                  # Added so it's accessible by the dataset
-        num_workers=4,               # Added for DataLoader optimization
-        corruption=None,             # The "turning on" switch string
-        corruption_lead_idx=0        # Target index for single-lead inversions
-    ):
+    def __init__(self, csv_path, data_root, leads=None, corruption=None,
+                 corruption_lead=None, batch_size=32, num_workers=0):
         super().__init__()
-        # self.save_hyperparameters() saves everything above to self.hparams
-        self.save_hyperparameters()
-        
-        # We instantiate a clean training dataset here just to extract a single 
-        # fitted MultiLabelBinarizer instance for all evaluation sets to share.
-        dummy_train = PTBXLDataset(
-            csv_path=self.hparams.csv_path, 
-            data_root=self.hparams.data_root, 
-            split="train"
-        )
-        self.fitted_mlb = dummy_train.mlb
+        self.csv_path, self.data_root = csv_path, data_root
+        self.leads = leads
+        self.corruption, self.corruption_lead = corruption, corruption_lead
+        self.batch_size, self.num_workers = batch_size, num_workers
+        self._X = None
+        self.class_names = None
+
+    def setup(self, stage=None):
+        if self._X is None:
+            self._X = np.load(f"{self.data_root}/X_numpy_ndarray.npy", mmap_mode="r")
+
+        common = dict(csv_path=self.csv_path, data_root=self.data_root,
+                      leads=self.leads, X_array=self._X)
+        # Fit the binarizer on train, reuse for val/test.
+        self.train_ds = PTBXLDataset(split="train", **common)
+        mlb = self.train_ds.mlb
+        self.class_names = self.train_ds.class_names
+        self.val_ds = PTBXLDataset(split="val", mlb=mlb, corruption=self.corruption,
+                                   corruption_lead=self.corruption_lead, **common)
+        self.test_ds = PTBXLDataset(split="test", mlb=mlb, corruption=self.corruption,
+                                    corruption_lead=self.corruption_lead, **common)
 
     def train_dataloader(self):
-        dataset = PTBXLDataset(
-            csv_path=self.hparams.csv_path,
-            data_root=self.hparams.data_root,
-            split="train",
-            leads=self.hparams.leads,
-            mlb=self.fitted_mlb,
-            corruption=None  # Keep training completely clean
-        )
-        return DataLoader(
-            dataset, 
-            batch_size=self.hparams.batch_size, 
-            shuffle=True, 
-            num_workers=self.hparams.num_workers
-        )
+        return DataLoader(self.train_ds, batch_size=self.batch_size, shuffle=True,
+                          num_workers=self.num_workers)
 
     def val_dataloader(self):
-        dataset = PTBXLDataset(
-            csv_path=self.hparams.csv_path,
-            data_root=self.hparams.data_root,
-            split="val",
-            leads=self.hparams.leads,
-            mlb=self.fitted_mlb,
-            corruption=None  # Keep validation completely clean
-        )
-        return DataLoader(
-            dataset, 
-            batch_size=self.hparams.batch_size, 
-            shuffle=False, 
-            num_workers=self.hparams.num_workers
-        )
+        return DataLoader(self.val_ds, batch_size=self.batch_size, shuffle=False,
+                          num_workers=self.num_workers)
 
     def test_dataloader(self):
-        dataset = PTBXLDataset(
-            csv_path=self.hparams.csv_path,
-            data_root=self.hparams.data_root,
-            split="test",
-            leads=self.hparams.leads,
-            mlb=self.fitted_mlb,
-            corruption=self.hparams.corruption,                  # Switch activated here!
-            corruption_lead_idx=self.hparams.corruption_lead_idx  # Lead index passed here!
-        )
-        return DataLoader(
-            dataset, 
-            batch_size=self.hparams.batch_size, 
-            shuffle=False, 
-            num_workers=self.hparams.num_workers
-        )
+        return DataLoader(self.test_ds, batch_size=self.batch_size, shuffle=False,
+                          num_workers=self.num_workers)

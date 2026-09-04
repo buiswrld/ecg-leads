@@ -1,73 +1,74 @@
+"""
+Diagnostic and robustness metrics.
+
+  - Computes per-class metrics for each diagnostic superclass plus an aggregate
+    ALL row (Methods 4.2).
+  - Class names are taken from mlb.classes_ to preserve the dataset's class order.
+"""
+
+import numpy as np
 import torch
 from torchmetrics.classification import (
     MultilabelAUROC, MultilabelAveragePrecision, MultilabelF1Score,
-    MultilabelStatScores
+    MultilabelStatScores,
 )
 
+
 class ECGMetrics:
-    def __init__(self, num_classes=5):
+    def __init__(self, num_classes=5, class_names=None, threshold=0.5, device="cpu"):
         self.num_classes = num_classes
-        self.auroc_metric = MultilabelAUROC(num_labels=num_classes, average="macro")
-        self.auprc_metric = MultilabelAveragePrecision(num_labels=num_classes, average="macro")
-        self.f1_metric = MultilabelF1Score(num_labels=num_classes, average="macro")
-        # Stat scores give us True Positives, False Positives, True Negatives, False Negatives
-        self.stats_metric = MultilabelStatScores(num_labels=num_classes, average="micro")
+        self.class_names = class_names or [f"class_{i}" for i in range(num_classes)]
+        self.threshold = threshold
+        k = dict(num_labels=num_classes)
+        # average=None -> per-class vectors
+        self.auroc = MultilabelAUROC(average=None, **k).to(device)
+        self.auprc = MultilabelAveragePrecision(average=None, **k).to(device)
+        self.f1 = MultilabelF1Score(average=None, threshold=threshold, **k).to(device)
+        self.stats = MultilabelStatScores(average=None, threshold=threshold, **k).to(device)
 
-    def compute_all(self, logits: torch.Tensor, labels: torch.Tensor) -> dict:
-        probs = torch.sigmoid(logits)
-        labels_int = labels.to(torch.long)
-        device = logits.device
+    def reset(self):
+        for m in (self.auroc, self.auprc, self.f1, self.stats):
+            m.reset()
 
-        auroc = self.auroc_metric.to(device)(probs, labels_int)
-        auprc = self.auprc_metric.to(device)(probs, labels_int)
-        f1 = self.f1_metric.to(device)(probs, labels_int)
-        
-        # Calculate raw stat counts for clinical ratios
-        tp, fp, tn, fn, _ = self.stats_metric.to(device)(probs, labels_int)
-        
-        # Avoid division by zero bugs
-        sensitivity = tp / (tp + fn + 1e-6)
-        specificity = tn / (tn + fp + 1e-6)
-        fnr = fn / (tp + fn + 1e-6)
+    def compute_all(self, probs, labels):
+        """
+        probs:  (N, C) float in [0,1]
+        labels: (N, C) binary
+        Returns {"per_class": {name: {...}}, "ALL": {...}}
+        """
+        self.reset()
+        labels_int = labels.int()
+        auroc = self.auroc(probs, labels_int).cpu().numpy()
+        auprc = self.auprc(probs, labels_int).cpu().numpy()
+        f1 = self.f1(probs, labels_int).cpu().numpy()
+        sc = self.stats(probs, labels_int).cpu().numpy()  # (C, 5): tp, fp, tn, fn, sup
 
-        return {
-            "auroc": auroc.item(),
-            "auprc": auprc.item(),
-            "f1": f1.item(),
-            "sensitivity": sensitivity.item(),
-            "specificity": specificity.item(),
-            "fnr": fnr.item(),
-            "raw_probs": probs.detach().cpu(),
-            "raw_preds": (probs > 0.5).to(torch.int).detach().cpu()
-        }
+        per_class, acc = {}, {k: [] for k in
+                              ["auroc", "auprc", "f1", "sensitivity", "specificity", "fnr"]}
+        for i, name in enumerate(self.class_names):
+            tp, fp, tn, fn = float(sc[i][0]), float(sc[i][1]), float(sc[i][2]), float(sc[i][3])
+            sens = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            spec = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+            row = {
+                "auroc": float(auroc[i]), "auprc": float(auprc[i]), "f1": float(f1[i]),
+                "sensitivity": sens, "specificity": spec, "fnr": 1.0 - sens,
+            }
+            per_class[name] = row
+            for k in acc:
+                acc[k].append(row[k])
+
+        # ALL = macro average across classes, consistent for every metric.
+        all_row = {k: float(np.mean(v)) for k, v in acc.items()}
+        return {"per_class": per_class, "ALL": all_row}
 
     @staticmethod
-    def compute_instability(clean_res: dict, corr_res: dict) -> dict:
-        """
-        Computes the novelty metrics: Diagnosis Flip Rate and Probability Shift
-        by comparing clean predictions against corrupted predictions.
-        """
-        clean_preds = clean_res["raw_preds"]
-        corr_preds = corr_res["raw_preds"]
-        clean_probs = clean_res["raw_probs"]
-        corr_probs = corr_res["raw_probs"]
-
-        # Diagnosis Flip Rate: How often did a 0 become a 1, or a 1 become a 0?
-        flips = (clean_preds != corr_preds).float().mean().item()
-
-        # Probability Shift: Mean absolute difference in output confidence strings
-        prob_shift = torch.abs(clean_probs - corr_probs).mean().item()
-
-        # False Negative Amplification (Clean was 1, Corrupted became 0)
-        fn_amp = ((clean_preds == 1) & (corr_preds == 0)).float().mean().item()
-
-        # False Positive Amplification (Clean was 0, Corrupted became 1)
-        fp_amp = ((clean_preds == 0) & (corr_preds == 1)).float().mean().item()
-
-        return {
-            "flip_rate": flips,
-            "prob_shift": prob_shift,
-            "fn_amp": fn_amp,
-            "fp_amp": fp_amp,
-            "perf_drop_auroc": max(0.0, clean_res["auroc"] - corr_res["auroc"])
-        }
+    def instability(clean_probs, corr_probs, threshold=0.5):
+        """Probability shift, label-wise flip rate, and any-class flip rate."""
+        clean_pred = (clean_probs >= threshold).int()
+        corr_pred = (corr_probs >= threshold).int()
+        prob_shift = torch.abs(corr_probs - clean_probs).mean().item()
+        flip_rate = (clean_pred != corr_pred).float().mean().item()
+        any_flip = ((clean_pred != corr_pred).any(dim=1)).float().mean().item()
+        return {"probability_shift": prob_shift,
+                "prediction_flip_rate": flip_rate,
+                "any_class_flip_rate": any_flip}
