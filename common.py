@@ -11,7 +11,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 
 import config
-from ecg import LEAD_ORDER, LEAD_IDX, CORRUPTION_AFFECTED_LEADS
+from ecg import LEAD_ORDER, LEAD_IDX, CORRUPTION_AFFECTED_LEADS, SWAP_REVERSAL_CORRUPTIONS
 from datamodule import PTBXLDataModule
 from classifier import ECGClassificationTask
 
@@ -128,10 +128,13 @@ def predictions_frame(sample_ids, labels, probs, class_names, threshold=0.5, **e
 
 
 # ---------------------------------------------------------------- runner
-def _dm(leads=None, corruption=None, corruption_lead=None):
+def _dm(leads=None, corruption=None, corruption_lead=None, 
+        augment_corruptions=False, corruption_prob=0.0,):
     return PTBXLDataModule(csv_path=config.CSV_PATH, data_root=config.DATA_ROOT,
                            leads=leads, corruption=corruption,
                            corruption_lead=corruption_lead,
+                           augment_corruptions=augment_corruptions,
+                           corruption_prob=corruption_prob,
                            batch_size=config.BATCH_SIZE,
                            num_workers=config.NUM_WORKERS)
 
@@ -149,11 +152,13 @@ def _trainer(max_epochs=None, callbacks=None):
 _CKPTS = {}
 
 
-def train_model(exp_name, leads=None, max_epochs=None, seed=config.SEED):
+def train_model(exp_name, leads=None, augment_corruptions=False, 
+                corruption_prob=0.0, max_epochs=None, seed=config.SEED):
     """Train on the clean training set. Returns the best checkpoint path."""
     max_epochs = max_epochs or config.MAX_EPOCHS
     pl.seed_everything(seed, workers=True)
-    dm = _dm(leads=leads)
+    dm = _dm(leads=leads, augment_corruptions=augment_corruptions, 
+             corruption_prob=corruption_prob,)
     dm.setup()
     task = ECGClassificationTask(num_leads=12 if leads is None else len(leads),
                                  num_classes=5, max_epochs=max_epochs,

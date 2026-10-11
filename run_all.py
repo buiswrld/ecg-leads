@@ -8,11 +8,11 @@ Run every experiment in order.
 import fire
 import pytorch_lightning as pl
 import config
-import experiment_1, experiment_2, experiment_3, experiment_4, experiment_5, experiment_6
+import experiment_1, experiment_2, experiment_3, experiment_4, experiment_5, experiment_6, experiment_7
 
 
-def main(lam=1.0, max_size=6, max_epochs=None, screening_epochs=None,
-         seed=config.SEED, only=None):
+def main(lam=1.0, corruption_prob=0.25, max_size=6, max_epochs=None, 
+         screening_epochs=None, seed=config.SEED, only=None):
     pl.seed_everything(seed, workers=True)
     print(f"seed={seed}  max_epochs={max_epochs or config.MAX_EPOCHS}  "
           f"screening_epochs={screening_epochs or config.SCREENING_EPOCHS}  lambda={lam}")
@@ -27,6 +27,7 @@ def main(lam=1.0, max_size=6, max_epochs=None, screening_epochs=None,
                                           screening_epochs, seed),
         "exp6b": lambda: experiment_6.run("6b", lam, max_size, max_epochs,
                                           screening_epochs, seed),
+        "exp7": lambda: experiment_7.run(corruption_prob, 3, max_epochs, seed)
     }
     order = [only] if only else ["exp1", "exp2", "exp3", "exp4", "exp5", "exp6a", "exp6b"]
     for k in order:

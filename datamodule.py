@@ -7,11 +7,14 @@ from dataset import PTBXLDataset
 
 class PTBXLDataModule(pl.LightningDataModule):
     def __init__(self, csv_path, data_root, leads=None, corruption=None,
-                 corruption_lead=None, batch_size=32, num_workers=0):
+                 corruption_lead=None, augment_corruptions=False, 
+                 corruption_prob=0.0, batch_size=32, num_workers=0):
         super().__init__()
         self.csv_path, self.data_root = csv_path, data_root
         self.leads = leads
         self.corruption, self.corruption_lead = corruption, corruption_lead
+        self.augment_corruptions = augment_corruptions
+        self.corruption_prob = corruption_prob
         self.batch_size, self.num_workers = batch_size, num_workers
         self._X = None
         self.class_names = None
@@ -23,7 +26,9 @@ class PTBXLDataModule(pl.LightningDataModule):
         common = dict(csv_path=self.csv_path, data_root=self.data_root,
                       leads=self.leads, X_array=self._X)
         # Fit the binarizer on train, reuse for val/test.
-        self.train_ds = PTBXLDataset(split="train", **common)
+        self.train_ds = PTBXLDataset(split="train", 
+                                     augment_corruptions=self.augment_corruptions, 
+                                     corruption_prob=self.corruption_prob, **common)
         mlb = self.train_ds.mlb
         self.class_names = self.train_ds.class_names
         self.val_ds = PTBXLDataset(split="val", mlb=mlb, corruption=self.corruption,

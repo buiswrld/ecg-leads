@@ -12,16 +12,25 @@ leads.
 
 import numpy as np
 import pandas as pd
+import random
 import torch
 from torch.utils.data import Dataset
 from sklearn.preprocessing import MultiLabelBinarizer
 
-from ecg import LEAD_ORDER, apply_corruption
+from ecg import LEAD_ORDER, apply_corruption, corruption_affects_subset, SWAP_REVERSAL_CORRUPTIONS
 
 
 class PTBXLDataset(Dataset):
     def __init__(self, csv_path, data_root, split="train", leads=None, mlb=None,
-                 corruption=None, corruption_lead=None, X_array=None):
+                 corruption=None, corruption_lead=None, X_array=None, 
+                 augment_corruptions=False, corruption_prob=0.0):   
+        self.split = split
+        self.augment_corruptions = augment_corruptions
+        self.corruption_prob = corruption_prob
+
+        if not 0 <= corruption_prob <= 1:
+            raise ValueError("corruption_prob must be between 0 and 1.")
+        
         self.lead_map = list(LEAD_ORDER)
 
         # `is None` -- an empty list is a real (degenerate) request, not "all"
@@ -71,7 +80,23 @@ class PTBXLDataset(Dataset):
         ecg = torch.from_numpy(np.asarray(self.X[index], dtype=np.float32)).transpose(0, 1)
 
         # 1. Corrupt the FULL 12-lead signal.
-        if self.corruption is not None:
+        if self.augment_corruptions and self.split == "train":
+            if random.random() < self.corruption_prob:
+                applicable = [
+                    (c, None) for c in SWAP_REVERSAL_CORRUPTIONS
+                    if corruption_affects_subset(c, self.leads)
+                ]
+                applicable += (
+                    ("single_lead_polarity_inversion", l)
+                    for l in self.leads
+                )
+
+                if applicable:
+                    corruption, corruption_lead = random.choice(applicable)
+
+                    ecg = apply_corruption(ecg, corruption, corruption_lead=corruption_lead)
+        
+        elif self.corruption is not None:
             ecg = apply_corruption(ecg, self.corruption, corruption_lead=self.corruption_lead)
 
         # 2. THEN extract the subset.
